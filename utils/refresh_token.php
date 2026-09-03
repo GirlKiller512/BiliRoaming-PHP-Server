@@ -35,5 +35,4 @@ curl_setopt($ch, CURLOPT_POSTFIELDS, $PostData);
 header('Content-Type: application/json; charset=utf-8');
 $output2 = curl_exec($ch);
 $httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
 ?>

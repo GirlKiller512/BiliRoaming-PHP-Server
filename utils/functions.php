@@ -39,7 +39,6 @@ function get_webpage($url, $host="", $ip="", $agent="") {
 		"User-Agent: ".$agent
 	));
 	$output = curl_exec($ch);
-	curl_close($ch);
 	return $output;
 }
 
@@ -55,7 +54,6 @@ function get_blacklist($uid) {
 		"User-Agent: ".AGENT
 	));
 	$output = curl_exec($ch);
-	curl_close($ch);
 	return $output;
 }
 

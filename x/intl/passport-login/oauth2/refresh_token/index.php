@@ -33,7 +33,6 @@ $PostData = "access_token=".ACCESS_TOKEN."&refresh_token=".REFRESH_TOKEN;
 curl_setopt($ch, CURLOPT_POSTFIELDS, $PostData);
 header('Content-Type: application/json; charset=utf-8');
 $output = curl_exec($ch);
-curl_close($ch);
 // 返回内容给用户
 print($output);
 ?>
