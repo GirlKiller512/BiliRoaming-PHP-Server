@@ -25,7 +25,6 @@ if (REDIS_ON) {
 }
 
 // 参数（判断是否刷新缓存）
-$refresh_cache = 0;
 $refresh_cache_season = 0;
 $refresh_cache_subtitle = 0;
 $refresh_cache_status = 0;
@@ -82,115 +81,8 @@ function get_userinfo_fromsql() {
 	return [$uid, $add_time, $due, $expired];
 }
 
-// 获取playurl缓存
-function get_cache() {
-	global $dbh;
-	global $member_type;
-	global $cache_type;
-	global $refresh_cache;
-	if (REDIS_ON) {
-		$redisConn = new redisFunc(REDIS_HOST, REDIS_PORT, REDIS_PASS);
-		if ($redisConn -> check(AREA.'-'.$member_type.'-'.$cache_type.'-'.CID.'-'.EP_ID)) {
-			@$cache = $redisConn -> get(AREA.'-'.$member_type.'-'.$cache_type.'-'.CID.'-'.EP_ID);
-			@$expired_time = $redisConn -> ttl(AREA.'-'.$member_type.'-'.$cache_type.'-'.CID.'-'.EP_ID)+time();
-		} else {
-			$cache = "";
-		}
-		if (!$cache) {
-			return "";
-		}
-	} else {
-		$sqlco = "SELECT `cache`,`expired_time` FROM `cache` WHERE `area` = '".AREA."' AND `type` = '".$member_type."' AND `cache_type` = '".$cache_type."' AND `cid` = '".CID."' AND `ep_id` = '".EP_ID."'";
-		$cres = $dbh -> query($sqlco);
-		$vnum = $cres -> fetch();
-		if (!$vnum){
-			return "";
-		}
-		@$cache = $vnum['cache'];
-		@$expired_time = $vnum['expired_time'];
-	}
-	//修复读取问题
-	$cache = str_replace("u0026", "&", $cache);
-	$cache = str_replace("\r", "\\r", $cache);
-	$cache = str_replace("\n", "\\n", $cache);
-	if (QN != "" && ($cache_type == "app" || $cache_type == "appV2")) {
-			$cache = str_replace('"data":{"video_info":{"quality":', '"data":{"video_info":{"quality":'.QN.',"quality_fuck":', $cache);
-			$cache = str_replace('"data":{"playurl":{"quality":', '"data":{"playurl":{"quality":'.QN.',"quality_fuck":', $cache);
-	}
-	if ($cache != "") {
-		if (time() <= (int)$expired_time) {
-			exit($cache);
-		} else {
-			// 准备刷新缓存
-			$refresh_cache = 1;
-		}
-	}
-	return "";
-}
-
-// 写入playurl缓存
-function write_cache() {
-	global $dbh;
-	global $SERVER_AREA;
-	global $type;
-	global $member_type;
-	global $cache_type;
-	global $output;
-	global $refresh_cache;
-	$ts = time();
-	$array = json_decode($output, true);
-	if (is_array($array)) {
-		$code = $array['code'];
-	} else {
-		$code = -404;
-	}
-	switch ($code) {
-		case "0":
-			// 删掉用户mid
-			/* 开始检测这个了
-			$array = json_decode($output, true);
-			$code = $array['code'];
-			$a = explode('mid=', $output);
-			$out = $a[0];
-			for ($j = 1; $j < count($a)-1; $j++) {
-				//echo $a[$j];
-				$b = explode('orderid=', $a[$j]);
-				$out = $out.'orderid='.$b[1];
-			}
-			$output = $out.$a[count($a)-1];
-			*/
-			$ts = $ts + CACHE_TIME;
-			// 获取 vip_status
-			$vip_status = explode(',"', explode('"vip_status":', $output)[1])[0];
-			// 缓存 playurl 前，使用 vip_status 字段来判断是否为大会员
-			if ($type == 1 && AREA != "th") { $member_type = intval($vip_status) + 1; }
-			break;
-		case "-10403":
-			$ts = $ts + CACHE_TIME_10403;
-			break;
-		case "-404":
-			$ts = $ts + CACHE_TIME_404;
-			break;
-		case "-412":
-			$ts = $ts + CACHE_TIME_412;
-			break;
-		default:
-			$ts = $ts + CACHE_TIME_OTHER;
-	}
-	if ($output !== "") { //没有获取到输出内容不写入缓存
-		if (REDIS_ON) {
-			$redisConn = new redisFunc(REDIS_HOST,REDIS_PORT,REDIS_PASS);
-			$redisConn->add(AREA.'-'.$member_type.'-'.$cache_type.'-'.CID.'-'.EP_ID, $output, $ts);
-		} else {
-			$sql = "INSERT INTO `cache` (`expired_time`,`area`,`type`,`cache_type`,`cid`,`ep_id`,`cache`) VALUES ('".$ts."','".AREA."','".$member_type."','".$cache_type."','".CID."','".EP_ID."','".$output."')";
-			// 刷新缓存
-			if ($refresh_cache == 1) {
-			$sql = "UPDATE `cache` SET `expired_time` = '".$ts."', `cache` = '".$output."' WHERE `area` = '".AREA."' AND `type` = '".$member_type."' AND `cache_type` = '".$cache_type."' AND `cid` = '".CID."' AND `ep_id` = '".EP_ID."';";
-			}
-			$dbh -> exec($sql);
-		}
-	}
-}
+// 播放缓存与其他缓存分开，便于独立验证 JSON 的无损存取。
+require_once __DIR__ . '/playurl_cache.php';
 
 // 获取season缓存
 function get_cache_season() {
