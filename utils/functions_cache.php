@@ -681,7 +681,7 @@ function write_log() {
 	if (!defined('AREA')) {define('AREA', "");}
 	if (!defined('BILIROAMING_VERSION')){define('BILIROAMING_VERSION', "");}
 	if (!defined('BILIROAMING_VERSION_CODE')){define('BILIROAMING_VERSION_CODE', "");}
-	if (BILIROAMING_VERSION_CODE == ""){$version_code = "0";}
+	$version_code = (int) BILIROAMING_VERSION_CODE;
 	if (!defined('ACCESS_KEY')){define('ACCESS_KEY', "");}
 	if (!defined('PATH')){define('PATH', "");}
 	if (!defined('QUERY')){define('QUERY', "");}
