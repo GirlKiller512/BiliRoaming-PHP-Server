@@ -23,10 +23,26 @@ if (IP_RESOLVE == 1) {
 }
 // 转发到指定服务器
 $url = $host.$path."?".$query;
+$agent = @$_SERVER["HTTP_USER_AGENT"];
+$headers = get_web_search_headers($agent);
 if (IP_RESOLVE == 1) {
-	$output = get_webpage($url, $host, $ip);
+	$output = get_webpage($url, $host, $ip, $agent, $headers);
 } else {
-	$output = get_webpage($url);
+	$output = get_webpage($url, "", "", $agent, $headers);
+}
+// Cookie 失效时刷新匿名设备身份并仅重试一次。
+if (is_bilibili_412_response($output)) {
+	$headers = get_web_search_headers($agent, true);
+	if (IP_RESOLVE == 1) {
+		$output = get_webpage($url, $host, $ip, $agent, $headers);
+	} else {
+		$output = get_webpage($url, "", "", $agent, $headers);
+	}
+}
+if (is_bilibili_412_response($output)) {
+	http_response_code(412);
+	header('Content-Type: application/json; charset=utf-8');
+	$output = '{"code":-412,"message":"request was banned","ttl":1}';
 }
 // 替换内容
 include (ROOT_PATH."utils/replace.php");

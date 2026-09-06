@@ -3,7 +3,7 @@
 if(!defined('SYSTEM')) {exit();}
 $member_type = 0; // 判断用户状态
 
-function get_webpage($url, $host="", $ip="", $agent="") {
+function get_webpage($url, $host="", $ip="", $agent="", $headers=array()) {
 	$ch = curl_init();
 	curl_setopt($ch, CURLOPT_URL, $url);
 	if (PROXY_ON == 1) { // 指定代理
@@ -25,7 +25,7 @@ function get_webpage($url, $host="", $ip="", $agent="") {
 				curl_setopt($ch, CURLOPT_PROXY, PROXY_IP);
 		}
 	}
-	if (IP_RESOLVE == 1) { // 指定ip回源
+	if (IP_RESOLVE == 1 && $host != "" && $ip != "") { // 指定ip回源
 		curl_setopt($ch, CURLOPT_RESOLVE,[$host.":443:".$ip]);
 	}
 	if ($agent == "") {
@@ -35,11 +35,126 @@ function get_webpage($url, $host="", $ip="", $agent="") {
 	curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 	curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
 	curl_setopt($ch, CURLOPT_POST, false);
-	curl_setopt($ch, CURLOPT_HTTPHEADER, array(
-		"User-Agent: ".$agent
-	));
+	$http_headers = array("User-Agent: ".$agent);
+	if (is_array($headers)) {
+		foreach ($headers as $header) {
+			if (is_string($header) && strpos($header, "\r") === false && strpos($header, "\n") === false) {
+				$http_headers[] = $header;
+			}
+		}
+	}
+	curl_setopt($ch, CURLOPT_HTTPHEADER, $http_headers);
 	$output = curl_exec($ch);
 	return $output;
+}
+
+// 获取 Web 搜索使用的匿名设备 Cookie，避免无设备身份的请求触发 B 站 412。
+function get_web_search_device_cookie($agent="", $force_refresh=false) {
+	if ($agent == "") {
+		$agent = @$_SERVER["HTTP_USER_AGENT"];
+	}
+	$area = defined('AREA') ? preg_replace('/[^a-z0-9_-]/i', '', AREA) : 'default';
+	$scope = defined('ROOT_PATH') ? ROOT_PATH : __DIR__;
+	$cache_id = substr(hash('sha256', $scope."|".$area), 0, 16);
+	$cache_file = rtrim(sys_get_temp_dir(), DIRECTORY_SEPARATOR).DIRECTORY_SEPARATOR."biliroaming_web_search_device_".$cache_id.".json";
+	$ttl = defined('WEB_SEARCH_DEVICE_TTL') ? max(300, (int)WEB_SEARCH_DEVICE_TTL) : 86400;
+	$handle = @fopen($cache_file, 'c+');
+	$cached = null;
+
+	if ($handle !== false && @flock($handle, LOCK_EX)) {
+		rewind($handle);
+		$cached = json_decode(stream_get_contents($handle), true);
+		$cached_cookie = build_web_search_device_cookie($cached);
+		if (!$force_refresh && $cached_cookie != "" && isset($cached['expires_at']) && (int)$cached['expires_at'] > time()) {
+			flock($handle, LOCK_UN);
+			fclose($handle);
+			return $cached_cookie;
+		}
+
+		$device = request_web_search_device($agent);
+		if ($device !== null) {
+			$device['expires_at'] = time() + $ttl;
+			rewind($handle);
+			ftruncate($handle, 0);
+			fwrite($handle, json_encode($device));
+			fflush($handle);
+			@chmod($cache_file, 0600);
+			$cached_cookie = build_web_search_device_cookie($device);
+		}
+		flock($handle, LOCK_UN);
+		fclose($handle);
+		return $cached_cookie;
+	}
+
+	if ($handle !== false) {
+		fclose($handle);
+	}
+	$device = request_web_search_device($agent);
+	return build_web_search_device_cookie($device);
+}
+
+function request_web_search_device($agent) {
+	$output = get_webpage(
+		"https://api.bilibili.com/x/frontend/finger/spi",
+		"",
+		"",
+		$agent,
+		array(
+			"Accept: application/json, text/plain, */*",
+			"Origin: https://search.bilibili.com",
+			"Referer: https://search.bilibili.com/"
+		)
+	);
+	$data = json_decode($output, true);
+	if (!is_array($data) || !isset($data['code']) || (int)$data['code'] !== 0 || !isset($data['data']['b_3']) || !isset($data['data']['b_4'])) {
+		return null;
+	}
+	return array(
+		'buvid3' => (string)$data['data']['b_3'],
+		'buvid4' => (string)$data['data']['b_4'],
+		'created_at' => time()
+	);
+}
+
+function build_web_search_device_cookie($device) {
+	if (!is_array($device) || empty($device['buvid3']) || empty($device['buvid4'])) {
+		return "";
+	}
+	$buvid3 = (string)$device['buvid3'];
+	$buvid4 = (string)$device['buvid4'];
+	if (preg_match('/[;\r\n]/', $buvid3.$buvid4)) {
+		return "";
+	}
+	$created_at = isset($device['created_at']) ? (int)$device['created_at'] : time();
+	return "buvid3=".$buvid3."; buvid4=".$buvid4."; b_nut=".$created_at;
+}
+
+function get_web_search_headers($agent="", $force_refresh=false) {
+	$headers = array(
+		"Accept: application/json, text/plain, */*",
+		"Accept-Language: zh-CN,zh;q=0.9",
+		"Origin: https://search.bilibili.com",
+		"Referer: https://search.bilibili.com/"
+	);
+	$cookie = get_web_search_device_cookie($agent, $force_refresh);
+	if ($cookie != "") {
+		$headers[] = "Cookie: ".$cookie;
+	}
+	return $headers;
+}
+
+function is_bilibili_412_response($output) {
+	if (!is_string($output) || $output == "") {
+		return false;
+	}
+	$data = json_decode($output, true);
+	if (is_array($data) && isset($data['code']) && (int)$data['code'] === -412) {
+		return true;
+	}
+	if (stripos($output, 'request was banned') !== false || stripos($output, 'bilibili security control policy') !== false) {
+		return true;
+	}
+	return strpos($output, '412') !== false && (strpos($output, '错误') !== false || stripos($output, 'err-code') !== false || stripos($output, '/412.js') !== false);
 }
 
 function get_blacklist($uid) {
